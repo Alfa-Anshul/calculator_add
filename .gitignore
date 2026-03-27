@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+env.bak/
+venv.bak/
+.env
+.venv
+
+# Node
+node_modules/
+.npm
+dist/
+build/
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Logs
+*.log
+npm-debug.log*
