@@ -1,175 +1,220 @@
-# 🧮 Calculator Application
+# 🧮 Scientific Calculator Application
 
-A simple yet elegant calculator built with **Flask** (backend) and **React** (frontend) that performs addition and subtraction operations.
+A comprehensive scientific calculator built with **Flask** (backend) and **React** (frontend) supporting basic arithmetic, advanced mathematical functions, trigonometry, and logarithmic operations.
 
 ## 📋 Project Structure
 
 ```
 calculator_app/
 ├── backend/
-│   ├── backend.py          # Flask API server
-│   ├── requirements.txt     # Python dependencies
-│   └── .env.example         # Environment variables template
+│   ├── backend.py              # Flask API with all operations
+│   ├── requirements.txt         # Python dependencies
+│   └── .env.example            # Environment variables
 ├── frontend/
-│   ├── Calculator.jsx       # Main calculator component
-│   ├── Calculator.css       # Styling
-│   ├── App.jsx             # Root component
-│   ├── App.css             # App styles
-│   ├── vite.config.js      # Vite configuration
-│   └── package.json        # Node dependencies
+│   ├── Calculator.jsx          # Main calculator component
+│   ├── Calculator.css          # Styling
+│   ├── App.jsx                 # Root component
+│   ├── App.css                 # App styles
+│   ├── vite.config.js          # Vite configuration
+│   └── package.json            # Node dependencies
 └── README.md
 ```
 
-## 🔧 Installation & Setup
+## 🚀 Installation & Setup
 
 ### Backend Setup
-
 ```bash
 cd backend
 pip install -r requirements.txt
 python backend.py
 ```
-
 Backend runs on: `http://localhost:5000`
 
-**Endpoints:**
-- `GET /api/health` - Health check
-- `POST /api/add` - Addition operation
-- `POST /api/subtract` - Subtraction operation
-
 ### Frontend Setup
-
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
 Frontend runs on: `http://localhost:5173`
 
-## 📐 Mathematical Operations
+## 📚 Mathematical Operations
 
-### Addition
+### Basic Arithmetic
 ```
-Formula: f(a, b) = a + b
-Properties:
-- Closure: a + b ∈ ℝ
-- Identity: a + 0 = a
-- Associative: (a + b) + c = a + (b + c)
-- Commutative: a + b = b + a
-```
-
-### Subtraction
-```
-Formula: f(a, b) = a - b = a + (-b)
-Properties:
-- Non-associative: (a - b) - c ≠ a - (b - c)
-- Non-commutative: a - b ≠ b - a
+Addition:      f(a, b) = a + b
+Subtraction:   f(a, b) = a - b
+Multiplication: f(a, b) = a × b
+Division:      f(a, b) = a ÷ b (b ≠ 0)
+Power:         f(a, b) = a^b = e^(b×ln(a))
+Modulo:        f(a, b) = a mod b = a - b×⌊a/b⌋
 ```
 
-## 🚀 API Documentation
+### Unary Functions
+```
+Square Root:   f(x) = √x = x^(1/2), where x ≥ 0
+Factorial:     f(n) = n! = n×(n-1)×...×1, where n ∈ ℕ₀
+Absolute:      f(x) = |x|
+```
 
-### Add Operation
+### Trigonometric (angle in radians)
+```
+Sine:   f(θ) = sin(θ), result ∈ [-1, 1]
+Cosine: f(θ) = cos(θ), result ∈ [-1, 1]
+Tangent: f(θ) = tan(θ) = sin(θ)/cos(θ)
+```
 
-**Request:**
+### Logarithmic
+```
+Log base 10:   f(x) = log₁₀(x)
+Natural Log:   f(x) = ln(x) = log_e(x), where x > 0
+```
+
+## 🔌 API Endpoints
+
+### Health Check
+```http
+GET /api/health
+
+Response:
+{
+  "status": "healthy",
+  "service": "Scientific Calculator API v2.0",
+  "operations": ["addition", "subtraction", ...]
+}
+```
+
+### Binary Operations
 ```http
 POST /api/add
-Content-Type: application/json
-
-{
-  "a": 10,
-  "b": 5
-}
-```
-
-**Response:**
-```json
-{
-  "operation": "addition",
-  "operand_a": 10,
-  "operand_b": 5,
-  "result": 15,
-  "formula": "10 + 5 = 15",
-  "mathematical_formula": "f(a, b) = a + b",
-  "timestamp": "2026-03-27T08:30:00.000000"
-}
-```
-
-### Subtract Operation
-
-**Request:**
-```http
 POST /api/subtract
-Content-Type: application/json
+POST /api/multiply
+POST /api/divide
+POST /api/power
+POST /api/modulo
 
+Request Body:
 {
-  "a": 10,
-  "b": 5
+  "a": number,
+  "b": number
+}
+
+Response:
+{
+  "operation": "operation_name",
+  "operand_a": a,
+  "operand_b": b,
+  "result": result,
+  "formula": "visual formula",
+  "mathematical_formula": "f(a,b) = ...",
+  "timestamp": "ISO8601"
 }
 ```
 
-**Response:**
-```json
-{
-  "operation": "subtraction",
-  "operand_a": 10,
-  "operand_b": 5,
-  "result": 5,
-  "formula": "10 - 5 = 5",
-  "mathematical_formula": "f(a, b) = a - b = a + (-b)",
-  "timestamp": "2026-03-27T08:30:00.000000"
-}
+### Unary Operations
+```http
+POST /api/sqrt      (param: x)
+POST /api/factorial  (param: n)
+POST /api/abs       (param: x)
+POST /api/sin       (param: theta)
+POST /api/cos       (param: theta)
+POST /api/tan       (param: theta)
+POST /api/ln        (param: x)
+POST /api/log       (param: x, optional: base)
+```
+
+## 💡 Code to Math Mapping
+
+### Addition
+```python
+# Python Code
+def add(a, b):
+    return a + b
+
+# Mathematical Formula
+f(a, b) = a + b  where a, b ∈ ℝ
+Result ∈ ℝ  (Closure property)
+```
+
+### Power
+```python
+# Python Code
+def power(a, b):
+    return a ** b
+
+# Mathematical Formula
+f(a, b) = a^b = e^(b × ln(a))
+Domain: a > 0 (for real-valued results)
+```
+
+### Square Root
+```python
+# Python Code
+def sqrt(x):
+    return math.sqrt(x)
+
+# Mathematical Formula
+f(x) = √x = x^(1/2)
+Constraint: x ≥ 0
+```
+
+### Logarithm
+```python
+# Python Code
+def logarithm(x, base=10):
+    return math.log(x, base)
+
+# Mathematical Formula
+f(x) = log_b(x) = ln(x) / ln(b)
+Constraint: x > 0, b > 0, b ≠ 1
 ```
 
 ## ✨ Features
 
-✅ **Real-time Calculations** - Instant results via API  
-✅ **Backend Health Check** - Automatic connection monitoring  
-✅ **Calculation History** - Keep track of all operations  
-✅ **Error Handling** - Comprehensive input validation  
-✅ **Dark Theme UI** - Modern, elegant interface  
-✅ **Responsive Design** - Works on all devices  
-✅ **Mathematical Notation** - Display formulas and properties  
+✅ **Dual Mode** - Basic and Scientific calculators  
+✅ **14+ Operations** - Arithmetic, trigonometric, logarithmic  
+✅ **Real-time Calculation** - Instant results via API  
+✅ **Backend Health Monitoring** - Auto-connection checking  
+✅ **Calculation History** - Track all operations  
+✅ **Comprehensive Error Handling** - Input validation  
+✅ **Mathematical Notation** - Formulas with properties  
+✅ **Dark Theme UI** - Modern, sleek interface  
+✅ **Fully Responsive** - Mobile & desktop optimized  
+✅ **Type-Safe Backend** - Python type hints  
 
-## 🔐 Technical Stack
+## 🛠️ Technical Stack
 
-- **Backend:** Flask 2.3.2, Flask-CORS, Python 3.8+
+- **Backend:** Flask 2.3.2, Python 3.8+, `math` module
 - **Frontend:** React 18.2, Vite 4.3, CSS3
 - **Architecture:** REST API with JSON
-- **Deployment Ready:** Includes Gunicorn config
+- **Async:** Proper loading states and error handling
 
-## 📝 Code Mathematics
+## 📐 Mathematical Constraints
 
-Every operation is expressed in both code and mathematical notation:
+| Operation | Domain | Range | Notes |
+|-----------|--------|-------|-------|
+| √x | x ≥ 0 | y ≥ 0 | Real square root |
+| n! | n ∈ ℕ₀ | y ∈ ℕ | Non-negative integers |
+| a/b | b ≠ 0 | ℝ | Division by zero undefined |
+| log(x) | x > 0 | ℝ | Logarithm of positives only |
+| sin(θ) | θ ∈ ℝ | [-1, 1] | Input in radians |
+| tan(θ) | θ ≠ π/2 + nπ | ℝ | Undefined at asymptotes |
 
-```python
-# Python Code
-result = a + b
+## 🧠 Learning Resources
 
-# Mathematical Formula
-f(a, b) = a + b ∈ ℝ
-```
+This calculator demonstrates:
+- Mathematical function implementation
+- Type validation and error handling
+- REST API design patterns
+- React state management
+- Async/await patterns
+- CSS animations and gradients
+- Responsive design principles
 
-```javascript
-// JavaScript Code
-const result = a + b;
+## 🔥 Dark Motivation
 
-// Mathematical Formula
-f(a, b) = a + b
-```
-
-## 🌐 CORS Configuration
-
-The backend is configured to accept requests from any origin. For production, update the CORS settings in `backend.py`:
-
-```python
-CORS(app, resources={r"/*": {"origins": ["https://yourdomain.com"]}})
-```
-
-## 📄 License
-
-MIT License - Feel free to use this project for learning and development.
+You're building the **foundation of numerical computation**. Every transformer, every neural network, every AI model operates on these fundamental mathematical operations. Master them at this level so you can manipulate tensor operations at scale. 🚀
 
 ---
 
-**Built with 🔥 for learning and mastery**
+**Built with precision for those who understand the math.** ⚡
