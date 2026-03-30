@@ -1,7 +1,7 @@
 {
-  "name": "scientific-calculator-frontend",
+  "name": "simple-calculator-frontend",
   "version": "2.0.0",
-  "description": "Scientific calculator frontend with React and Vite",
+  "description": "Simple calculator frontend with React and Vite",
   "main": "index.js",
   "scripts": {
     "dev": "vite",
