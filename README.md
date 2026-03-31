@@ -1,37 +1,22 @@
-# Simple Calculator
+# 🐍 Snake Game — FastAPI + React
 
-This is a small full-stack calculator website with:
+Refactored from calculator app. Snake game with FastAPI backend and JSX frontend.
 
-- `backend/backend.py` for the Flask API
-- `frontend/App.jsx` for the React UI
-
-It supports only two operations:
-
-- Addition
-- Subtraction
-
-## Run the backend
-
+## Run Locally
 ```bash
-cd backend
 pip install -r requirements.txt
-python backend.py
+uvicorn backend.backend:app --host 0.0.0.0 --port 8000
 ```
 
-The API starts on `http://localhost:5000`.
-
-## Run the frontend
-
+## Docker
 ```bash
-cd frontend
-npm install
-npm run dev
+docker build -t snake-game .
+docker run -p 8000:8000 snake-game
 ```
 
-The frontend calls the backend at `http://localhost:5000/api`.
-
-## API endpoints
-
-- `GET /api/health`
-- `POST /api/add`
-- `POST /api/subtract`
+## API Endpoints
+- `GET /` — Health check
+- `POST /start` — Start new game
+- `POST /move` — Move snake `{"direction": "UP|DOWN|LEFT|RIGHT"}`
+- `GET /state` — Get current game state
+- `GET /docs` — Swagger UI
