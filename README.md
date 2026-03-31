@@ -1,41 +1,30 @@
-# 🐍 Snake Web Game — FastAPI + React
+# Tic-Tac-Toe (FastAPI + React)
 
-A classic Snake game with a FastAPI backend and React frontend, served as static files.
+A full-stack Tic-Tac-Toe web app.
 
-## Structure
-
-```
-backend/backend.py   # FastAPI app + game logic
-frontend/App.jsx     # React game UI
-frontend/index.html  # Entry point
-frontend/style.css   # Styles
-requirements.txt
-Dockerfile
-```
+## Stack
+- **Backend**: FastAPI (Python 3.10)
+- **Frontend**: React JSX (served as static files)
+- **Deploy**: Docker on EC2
 
 ## Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Health check |
+| GET | `/state` | Get current game state |
+| POST | `/move` | Make a move `{"index": 0-8}` |
+| POST | `/reset` | Reset the board |
+| GET | `/app` | Frontend UI |
+| GET | `/docs` | Swagger UI |
 
-| Method | Path     | Description          |
-|--------|----------|----------------------|
-| GET    | /        | Health check         |
-| POST   | /start   | Start new game       |
-| POST   | /move    | Move snake (body: `{"direction": "UP"}`) |
-| GET    | /state   | Get current state    |
-
-## Run Locally
-
+## Run locally
 ```bash
 pip install -r requirements.txt
 uvicorn backend.backend:app --reload
 ```
 
-Open: http://localhost:8000
-
 ## Docker
-
 ```bash
-docker build -t snake-game .
-docker run -p 8000:8000 snake-game
+docker build -t tictactoe .
+docker run -p 8000:8000 tictactoe
 ```
-
-API Docs: http://localhost:8000/docs
