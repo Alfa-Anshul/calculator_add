@@ -86,7 +86,7 @@ TOOLS = [
     },
     {
         "name": "save_project_scaffold",
-        "description": "Save scaffold payload locally, or push it to GitHub as well when github_repo_url is provided.",
+        "description": "Save scaffold payload locally, or push it to GitHub as well when github_repo_url is provided. Use create_repo first if the repository does not exist yet.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -118,8 +118,26 @@ TOOLS = [
         },
     },
     {
+        "name": "create_repo",
+        "description": "Create a GitHub repository using GITHUB_TOKEN from runtime environment or .env. Repositories are public by default.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "minLength": 1},
+                "owner": {"type": "string", "minLength": 1},
+                "description": {"type": "string"},
+                "homepage": {"type": "string", "format": "uri"},
+                "public": {"type": "boolean"},
+                "auto_init": {"type": "boolean"},
+                "github_token": {"type": "string", "minLength": 1},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "github_integretion",
-        "description": "Create scaffold files locally, commit them, and push to GitHub using GITHUB_TOKEN from runtime environment or .env (or an optional github_token argument).",
+        "description": "Create scaffold files locally, commit them, and push to GitHub using GITHUB_TOKEN from runtime environment or .env (or an optional github_token argument). Use create_repo first if the repository does not exist yet.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -341,6 +359,13 @@ async def save_project_scaffold(payload: dict[str, Any], __: Session | None = No
     }
 
 
+async def create_repo(payload: dict[str, Any], __: Session | None = None) -> dict[str, Any]:
+    result = run_local_mcp_tool("create_repo", payload)
+    if not isinstance(result, dict):
+        raise ValueError("Unexpected non-dict response from create_repo")
+    return result
+
+
 async def github_integretion(payload: dict[str, Any], __: Session | None = None) -> dict[str, Any]:
     result = run_local_mcp_tool("github_integretion", payload)
     if not isinstance(result, dict):
@@ -374,6 +399,7 @@ TOOL_REGISTRY: dict[str, Callable[[dict[str, Any], Session | None], Awaitable[di
     "call_external_api": call_external_api,
     "send_email": send_email,
     "save_project_scaffold": save_project_scaffold,
+    "create_repo": create_repo,
     "github_integretion": github_integretion,
     "deploy_inDocker": deploy_inDocker,
     "map_domain": map_domain,
