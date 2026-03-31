@@ -1,137 +1,100 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-import json
+from pydantic import BaseModel
+from typing import Optional
 import os
-from typing import List, Optional
 
-app = FastAPI(title="Tic Tac Toe API", version="1.0.0")
+app = FastAPI(title="Tic-Tac-Toe API")
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Game state storage (in-memory)
+# ── Game State ──────────────────────────────────────────────
 game_state = {
-    "board": [None] * 9,
+    "board": [""] * 9,
     "current_player": "X",
-    "game_over": False,
     "winner": None,
-    "x_score": 0,
-    "o_score": 0,
-    "draws": 0
+    "game_over": False,
+    "scores": {"X": 0, "O": 0, "draws": 0},
 }
 
-# Winning combinations
 WINNING_COMBOS = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6]
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6],
 ]
 
-def check_winner(board: List) -> Optional[str]:
-    """Check if there's a winner."""
+def check_winner(board):
     for combo in WINNING_COMBOS:
-        if board[combo[0]] and board[combo[0]] == board[combo[1]] == board[combo[2]]:
-            return board[combo[0]]
+        a, b, c = combo
+        if board[a] and board[a] == board[b] == board[c]:
+            return board[a]
     return None
 
-def check_draw(board: List) -> bool:
-    """Check if the game is a draw."""
-    return None not in board
+def check_draw(board):
+    return all(cell != "" for cell in board)
 
-@app.get("/")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "message": "Tic Tac Toe API is running"}
+# ── Endpoints ───────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "Tic-Tac-Toe API"}
 
 @app.get("/state")
-async def get_state():
-    """Get current game state."""
+def get_state():
     return game_state
 
+@app.post("/start")
+def start_game():
+    game_state["board"] = [""] * 9
+    game_state["current_player"] = "X"
+    game_state["winner"] = None
+    game_state["game_over"] = False
+    return {"message": "Game started", "state": game_state}
+
+class MoveRequest(BaseModel):
+    index: int
+
 @app.post("/move")
-async def make_move(position: int):
-    """Make a move on the board."""
-    if position < 0 or position > 8:
-        return {"error": "Invalid position", "status": "error"}
-    
-    if game_state["board"][position] is not None:
-        return {"error": "Position already taken", "status": "error"}
-    
+def make_move(req: MoveRequest):
+    idx = req.index
     if game_state["game_over"]:
-        return {"error": "Game is over", "status": "error"}
-    
-    # Make the move
-    game_state["board"][position] = game_state["current_player"]
-    
-    # Check for winner
+        return {"error": "Game is over. Start a new game.", "state": game_state}
+    if idx < 0 or idx > 8:
+        return {"error": "Invalid index", "state": game_state}
+    if game_state["board"][idx] != "":
+        return {"error": "Cell already taken", "state": game_state}
+
+    game_state["board"][idx] = game_state["current_player"]
     winner = check_winner(game_state["board"])
+
     if winner:
-        game_state["game_over"] = True
         game_state["winner"] = winner
-        if winner == "X":
-            game_state["x_score"] += 1
-        else:
-            game_state["o_score"] += 1
-        return {"status": "win", "winner": winner, "game_state": game_state}
-    
-    # Check for draw
-    if check_draw(game_state["board"]):
         game_state["game_over"] = True
-        game_state["draws"] += 1
-        return {"status": "draw", "game_state": game_state}
-    
-    # Switch player
-    game_state["current_player"] = "O" if game_state["current_player"] == "X" else "X"
-    
-    return {"status": "ok", "game_state": game_state}
+        game_state["scores"][winner] += 1
+    elif check_draw(game_state["board"]):
+        game_state["winner"] = "Draw"
+        game_state["game_over"] = True
+        game_state["scores"]["draws"] += 1
+    else:
+        game_state["current_player"] = "O" if game_state["current_player"] == "X" else "X"
 
-@app.post("/reset")
-async def reset_game():
-    """Reset the game board."""
-    x_score = game_state["x_score"]
-    o_score = game_state["o_score"]
-    draws = game_state["draws"]
-    
-    game_state["board"] = [None] * 9
-    game_state["current_player"] = "X"
-    game_state["game_over"] = False
-    game_state["winner"] = None
-    game_state["x_score"] = x_score
-    game_state["o_score"] = o_score
-    game_state["draws"] = draws
-    
-    return {"status": "reset", "game_state": game_state}
+    return {"state": game_state}
 
-@app.post("/reset-scores")
-async def reset_scores():
-    """Reset all scores."""
-    game_state["board"] = [None] * 9
-    game_state["current_player"] = "X"
-    game_state["game_over"] = False
-    game_state["winner"] = None
-    game_state["x_score"] = 0
-    game_state["o_score"] = 0
-    game_state["draws"] = 0
-    
-    return {"status": "scores_reset", "game_state": game_state}
+# ── Serve Frontend ──────────────────────────────────────────
+frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+if os.path.isdir(frontend_path):
+    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 
-# Serve static files
-if os.path.exists("frontend"):
-    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/")
+def root():
+    index_file = os.path.join(frontend_path, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"message": "Tic-Tac-Toe API running. Visit /docs"}
