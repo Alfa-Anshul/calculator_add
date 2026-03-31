@@ -573,8 +573,17 @@ def run_local_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, A
         deploy_docker_command = str(arguments.get("deploy_docker_command") or "").strip() or None
         certbot_email = str(arguments.get("certbot_email") or "").strip() or None
         hostinger_api_token = str(arguments.get("hostinger_api_token") or "")
-        hostinger_zone_domain = str(arguments.get("hostinger_zone_domain") or "").strip() or None
+        # Auto-derive zone domain from the subdomain if not explicitly provided
+        # e.g. tic_tactoe.anervera.live → zone = anervera.live
+        raw_zone = str(arguments.get("hostinger_zone_domain") or "").strip()
+        if not raw_zone and domain:
+            parts = domain.strip().lower().split(".")
+            raw_zone = ".".join(parts[-2:]) if len(parts) >= 3 else domain.strip().lower()
+        hostinger_zone_domain = raw_zone or None
         dns_target_ip = str(arguments.get("dns_target_ip") or "").strip() or None
+        # Auto-infer dns_target_ip from deploy_ssh_host if not explicitly provided
+        if not dns_target_ip and deploy_ssh_host:
+            dns_target_ip = deploy_ssh_host.strip()
         include_www_alias = bool(arguments.get("include_www_alias", True))
         enable_https = bool(arguments.get("enable_https", True))
 
