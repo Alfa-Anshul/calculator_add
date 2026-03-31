@@ -62,6 +62,25 @@ class DeployInDockerRequest(BaseModel):
     deploy_docker_command: str | None = None
 
 
+class MapDomainRequest(BaseModel):
+    domain: str
+    container_name: str | None = None
+    port: int | None = None
+    docs_path: str = "/docs"
+    deploy_ssh_host: str | None = None
+    deploy_ssh_user: str | None = None
+    deploy_ssh_port: int | None = None
+    deploy_ssh_key_path: str | None = None
+    deploy_ssh_private_key: str | None = None
+    deploy_docker_command: str | None = None
+    certbot_email: str | None = None
+    hostinger_api_token: str | None = None
+    hostinger_zone_domain: str | None = None
+    dns_target_ip: str | None = None
+    include_www_alias: bool = True
+    enable_https: bool = True
+
+
 class MemoryCreateRequest(BaseModel):
     key: str
     value: str
