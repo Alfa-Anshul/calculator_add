@@ -1,10 +1,11 @@
-const API = '';
+const API = "";
 
 function Cell({ value, onClick, isWinning }) {
   return (
     <button
-      className={`cell ${value === 'X' ? 'cell-x' : value === 'O' ? 'cell-o' : ''} ${isWinning ? 'cell-win' : ''}`}
+      className={`cell ${value === "X" ? "cell-x" : value === "O" ? "cell-o" : ""} ${isWinning ? "cell-winning" : ""}`}
       onClick={onClick}
+      disabled={!!value}
     >
       {value}
     </button>
@@ -14,81 +15,95 @@ function Cell({ value, onClick, isWinning }) {
 function Board() {
   const [state, setState] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
-  const [winCells, setWinCells] = React.useState([]);
+  const [error, setError] = React.useState(null);
 
-  const WINNING_COMBOS = [
-    [0,1,2],[3,4,5],[6,7,8],
-    [0,3,6],[1,4,7],[2,5,8],
-    [0,4,8],[2,4,6]
-  ];
-
-  function findWinCells(board) {
-    for (const combo of WINNING_COMBOS) {
-      const [a,b,c] = combo;
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) return combo;
+  const fetchState = async () => {
+    try {
+      const res = await fetch(`${API}/state`);
+      const data = await res.json();
+      setState(data);
+    } catch (e) {
+      setError("Cannot reach server");
     }
-    return [];
-  }
-
-  async function fetchState() {
-    const res = await fetch(`${API}/state`);
-    const data = await res.json();
-    setState(data);
-    setWinCells(findWinCells(data.board));
-  }
-
-  async function makeMove(idx) {
-    if (loading || !state || state.game_over || state.board[idx]) return;
-    setLoading(true);
-    const res = await fetch(`${API}/move`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index: idx })
-    });
-    const data = await res.json();
-    setState(data);
-    setWinCells(findWinCells(data.board));
-    setLoading(false);
-  }
-
-  async function resetGame() {
-    const res = await fetch(`${API}/reset`, { method: 'POST' });
-    const data = await res.json();
-    setState(data);
-    setWinCells([]);
-  }
+  };
 
   React.useEffect(() => { fetchState(); }, []);
 
-  if (!state) return <div className="loading">Loading game...</div>;
+  const startGame = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/start`, { method: "POST" });
+      const data = await res.json();
+      setState(data.state);
+    } catch (e) { setError("Start failed"); }
+    setLoading(false);
+  };
 
-  const statusMsg = state.game_over
-    ? state.winner === 'Draw' ? "It's a Draw! 🤝" : `Player ${state.winner} Wins! 🎉`
-    : `Player ${state.current_player}'s Turn`;
+  const makeMove = async (index) => {
+    if (!state || state.game_over || state.board[index]) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index }),
+      });
+      const data = await res.json();
+      if (data.state) setState(data.state);
+      if (data.error) setError(data.error);
+    } catch (e) { setError("Move failed"); }
+    setLoading(false);
+  };
+
+  const getStatus = () => {
+    if (!state) return "Loading...";
+    if (state.winner === "Draw") return "🤝 It's a Draw!";
+    if (state.winner) return `🏆 Player ${state.winner} Wins!`;
+    return `Player ${state.current_player}'s Turn`;
+  };
 
   return (
-    <div className="container">
-      <h1 className="title">Tic-Tac-Toe</h1>
-      <div className="scoreboard">
-        <div className="score score-x">X: {state.scores.X}</div>
-        <div className="score score-draw">Draws: {state.scores.draws}</div>
-        <div className="score score-o">O: {state.scores.O}</div>
+    <div className="app">
+      <h1 className="title">⚡ Tic-Tac-Toe</h1>
+
+      {state && (
+        <div className="scoreboard">
+          <span className="score score-x">X: {state.scores.X}</span>
+          <span className="score score-draw">Draw: {state.scores.draws}</span>
+          <span className="score score-o">O: {state.scores.O}</span>
+        </div>
+      )}
+
+      <div className={`status ${state?.winner ? "status-winner" : ""}`}>
+        {getStatus()}
       </div>
-      <div className={`status ${state.game_over ? 'status-over' : ''}`}>{statusMsg}</div>
+
+      {error && <div className="error">{error}</div>}
+
       <div className="board">
-        {state.board.map((cell, i) => (
+        {state ? state.board.map((cell, i) => (
           <Cell
             key={i}
             value={cell}
-            isWinning={winCells.includes(i)}
             onClick={() => makeMove(i)}
+            isWinning={false}
           />
+        )) : Array(9).fill(null).map((_, i) => (
+          <Cell key={i} value="" onClick={() => {}} />
         ))}
       </div>
-      <button className="reset-btn" onClick={resetGame}>New Game</button>
+
+      <button
+        className={`btn-start ${loading ? "btn-loading" : ""}`}
+        onClick={startGame}
+        disabled={loading}
+      >
+        {loading ? "..." : state?.game_over ? "🔁 Play Again" : "🆕 New Game"}
+      </button>
     </div>
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
+const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<Board />);
