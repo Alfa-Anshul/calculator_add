@@ -4,11 +4,13 @@ import base64
 import io
 import re
 import shlex
+import socket
 import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 import paramiko
 
 from ..config import get_settings
@@ -156,6 +158,113 @@ def deploy_repo_in_docker(
         ssh.close()
 
 
+def map_domain_to_deployment(
+    *,
+    domain: str,
+    container_name: str | None = None,
+    port: int | None = None,
+    docs_path: str = "/docs",
+    deploy_ssh_host: str | None = None,
+    deploy_ssh_user: str | None = None,
+    deploy_ssh_port: int | None = None,
+    deploy_ssh_key_path: str | None = None,
+    deploy_ssh_private_key: str | None = None,
+    deploy_docker_command: str | None = None,
+    certbot_email: str | None = None,
+    hostinger_api_token: str = "",
+    hostinger_zone_domain: str | None = None,
+    dns_target_ip: str | None = None,
+    include_www_alias: bool = True,
+    enable_https: bool = True,
+) -> dict[str, Any]:
+    settings = get_settings()
+
+    normalized_domain = _normalize_domain(domain)
+    normalized_docs_path = _normalize_docs_path(docs_path)
+    ssh_host = (deploy_ssh_host or settings.deploy_ssh_host).strip()
+    if not ssh_host:
+        raise ValueError("DEPLOY_SSH_HOST is not configured.")
+
+    ssh_user = (deploy_ssh_user or settings.deploy_ssh_user).strip() or "ubuntu"
+    ssh_port = int(deploy_ssh_port or settings.deploy_ssh_port)
+    docker_command = _normalize_shell_command(deploy_docker_command or settings.deploy_docker_command)
+    resolved_zone_domain = _normalize_domain(hostinger_zone_domain or normalized_domain)
+    resolved_dns_target_ip = (dns_target_ip or ssh_host).strip()
+    if not resolved_dns_target_ip:
+        raise ValueError("dns_target_ip could not be resolved.")
+
+    ssh = _connect_ssh(
+        host=ssh_host,
+        port=ssh_port,
+        username=ssh_user,
+        key_path=deploy_ssh_key_path or settings.deploy_ssh_key_path,
+        private_key=deploy_ssh_private_key or settings.deploy_ssh_private_key,
+    )
+    try:
+        resolved_container_name = container_name.strip() if isinstance(container_name, str) and container_name.strip() else None
+        resolved_port = int(port) if port is not None else None
+        if resolved_port is None:
+            if not resolved_container_name:
+                raise ValueError("Either port or container_name is required for map_domain.")
+            resolved_port = _get_existing_container_port(ssh, docker_command, resolved_container_name)
+            if resolved_port is None:
+                raise ValueError(f"Could not determine the published port for container '{resolved_container_name}'.")
+
+        _install_reverse_proxy_dependencies(ssh, enable_https=enable_https)
+
+        site_name = _trim_name(f"mcp-domain-{_slugify(normalized_domain)}")
+        nginx_config = _render_nginx_site(domain=normalized_domain, proxy_port=resolved_port)
+        _write_nginx_site(ssh, site_name=site_name, nginx_config=nginx_config)
+        _reload_nginx(ssh)
+        _wait_for_local_proxy(ssh, domain=normalized_domain, proxy_port=resolved_port)
+
+        dns_result = _check_dns_alignment(normalized_domain, resolved_dns_target_ip)
+        hostinger_result = {
+            "checked": False,
+            "updated": False,
+            "zone_domain": resolved_zone_domain,
+        }
+        if hostinger_api_token.strip():
+            hostinger_result = _sync_hostinger_dns(
+                domain=normalized_domain,
+                zone_domain=resolved_zone_domain,
+                target_ip=resolved_dns_target_ip,
+                api_token=hostinger_api_token,
+                include_www_alias=include_www_alias,
+            )
+
+        tls_enabled = False
+        tls_email = (certbot_email or settings.deploy_certbot_email).strip()
+        if enable_https and tls_email:
+            _obtain_tls_certificate(ssh, domain=normalized_domain, email=tls_email)
+            tls_enabled = True
+            _wait_for_public_proxy(ssh, domain=normalized_domain, docs_path=normalized_docs_path, https=True)
+        elif enable_https:
+            dns_result.setdefault("warnings", []).append(
+                "HTTPS was requested but certbot_email is not configured, so the domain remains on HTTP."
+            )
+
+        if not tls_enabled:
+            _wait_for_public_proxy(ssh, domain=normalized_domain, docs_path=normalized_docs_path, https=False)
+
+        scheme = "https" if tls_enabled else "http"
+        public_url = f"{scheme}://{normalized_domain}"
+        return {
+            "mapped": True,
+            "domain": normalized_domain,
+            "public_url": public_url,
+            "docs_url": f"{public_url}{normalized_docs_path}",
+            "container_name": resolved_container_name,
+            "port": resolved_port,
+            "tls_enabled": tls_enabled,
+            "dns": dns_result,
+            "hostinger": hostinger_result,
+            "nginx_site": site_name,
+        }
+    finally:
+        ssh.close()
+
+
 def _sanitize_github_token(raw_token: Any) -> str:
     token = str(raw_token or "").strip()
     if len(token) >= 2 and ((token[0] == '"' and token[-1] == '"') or (token[0] == "'" and token[-1] == "'")):
@@ -193,6 +302,28 @@ def _parse_github_repo(repo_url: str) -> tuple[str, str]:
     return parts[0], parts[1].removesuffix(".git")
 
 
+def _normalize_domain(domain: str) -> str:
+    normalized = domain.strip().lower()
+    if not normalized:
+        raise ValueError("domain is required.")
+    if "://" in normalized:
+        parsed = urlparse(normalized)
+        normalized = parsed.netloc or parsed.path
+    normalized = normalized.strip("/").strip(".")
+    if not normalized:
+        raise ValueError("domain is required.")
+    if "/" in normalized:
+        raise ValueError("domain must not contain a path.")
+    return normalized
+
+
+def _normalize_docs_path(docs_path: str) -> str:
+    value = (docs_path or "/docs").strip()
+    if not value.startswith("/"):
+        value = f"/{value}"
+    return value.rstrip("/") or "/"
+
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "fastapi-app"
@@ -206,6 +337,233 @@ def _trim_name(value: str, max_length: int = 63) -> str:
 def _normalize_shell_command(command: str) -> str:
     parts = shlex.split(command.strip() or "docker")
     return " ".join(shlex.quote(part) for part in parts)
+
+
+def _install_reverse_proxy_dependencies(ssh: paramiko.SSHClient, *, enable_https: bool) -> None:
+    packages = ["nginx"]
+    if enable_https:
+        packages.extend(["certbot", "python3-certbot-nginx"])
+    package_list = " ".join(packages)
+    binaries = ["nginx"]
+    if enable_https:
+        binaries.append("certbot")
+    binary_checks = "\n".join(
+        f"if ! command -v {shlex.quote(binary)} >/dev/null 2>&1; then missing=1; fi" for binary in binaries
+    )
+    script = f"""
+set -euo pipefail
+missing=0
+{binary_checks}
+if [ "$missing" -eq 1 ]; then
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y {package_list}
+fi
+sudo mkdir -p /var/www/certbot
+"""
+    _run_remote(ssh, script)
+
+
+def _render_nginx_site(*, domain: str, proxy_port: int) -> str:
+    return "\n".join(
+        [
+            "server {",
+            "    listen 80;",
+            "    listen [::]:80;",
+            f"    server_name {domain};",
+            "",
+            "    client_max_body_size 25m;",
+            "",
+            "    location /.well-known/acme-challenge/ {",
+            "        root /var/www/certbot;",
+            "    }",
+            "",
+            "    location / {",
+            f"        proxy_pass http://127.0.0.1:{proxy_port};",
+            "        proxy_http_version 1.1;",
+            "        proxy_set_header Host $host;",
+            "        proxy_set_header X-Real-IP $remote_addr;",
+            "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+            "        proxy_set_header X-Forwarded-Proto $scheme;",
+            "        proxy_set_header Upgrade $http_upgrade;",
+            "        proxy_set_header Connection \"upgrade\";",
+            "        proxy_read_timeout 120s;",
+            "    }",
+            "}",
+            "",
+        ]
+    )
+
+
+def _write_nginx_site(ssh: paramiko.SSHClient, *, site_name: str, nginx_config: str) -> None:
+    encoded_config = base64.b64encode(nginx_config.encode("utf-8")).decode("ascii")
+    script = f"""
+set -euo pipefail
+tmp_file=/tmp/{site_name}.conf
+printf '%s' {shlex.quote(encoded_config)} | base64 -d > "$tmp_file"
+sudo mv "$tmp_file" /etc/nginx/sites-available/{site_name}
+sudo ln -sfn /etc/nginx/sites-available/{site_name} /etc/nginx/sites-enabled/{site_name}
+sudo rm -f /etc/nginx/sites-enabled/default
+"""
+    _run_remote(ssh, script)
+
+
+def _reload_nginx(ssh: paramiko.SSHClient) -> None:
+    _run_remote(ssh, "sudo nginx -t && sudo systemctl reload nginx")
+
+
+def _wait_for_local_proxy(ssh: paramiko.SSHClient, *, domain: str, proxy_port: int) -> None:
+    script = f"""
+python3 - <<'PY'
+import time
+import urllib.request
+
+url = 'http://127.0.0.1/'
+headers = {{'Host': '{domain}'}}
+for _ in range(20):
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=3) as response:
+            if response.status < 500:
+                raise SystemExit(0)
+    except Exception:
+        time.sleep(2)
+raise SystemExit(1)
+PY
+"""
+    exit_code, _, error_text = _run_remote(ssh, script, check=False)
+    if exit_code != 0:
+        raise RuntimeError(error_text or f"Nginx did not proxy traffic to port {proxy_port} in time.")
+
+
+def _obtain_tls_certificate(ssh: paramiko.SSHClient, *, domain: str, email: str) -> None:
+    script = f"""
+set -euo pipefail
+sudo certbot --nginx --non-interactive --agree-tos --redirect -m {shlex.quote(email)} -d {shlex.quote(domain)}
+"""
+    _run_remote(ssh, script)
+
+
+def _wait_for_public_proxy(ssh: paramiko.SSHClient, *, domain: str, docs_path: str, https: bool) -> None:
+    scheme = "https" if https else "http"
+    port = 443 if https else 80
+    insecure_flag = "-k" if https else ""
+    script = f"""
+set -euo pipefail
+for _ in $(seq 1 20); do
+  if curl -fsS {insecure_flag} --resolve {shlex.quote(domain)}:{port}:127.0.0.1 {shlex.quote(f'{scheme}://{domain}{docs_path}')} >/dev/null 2>&1; then
+    exit 0
+  fi
+  sleep 2
+done
+exit 1
+"""
+    exit_code, _, error_text = _run_remote(ssh, script, check=False)
+    if exit_code != 0:
+        raise RuntimeError(error_text or f"{scheme.upper()} endpoint for {domain} did not become reachable in time.")
+
+
+def _check_dns_alignment(domain: str, target_ip: str) -> dict[str, Any]:
+    try:
+        resolved_ips = sorted(set(socket.gethostbyname_ex(domain)[2]))
+    except OSError:
+        resolved_ips = []
+    matches = target_ip in resolved_ips
+    warnings: list[str] = []
+    if not matches:
+        warnings.append(
+            f"DNS for {domain} does not currently resolve to {target_ip}. Update your Hostinger A record if HTTPS validation fails."
+        )
+    return {
+        "checked": True,
+        "resolved_ips": resolved_ips,
+        "target_ip": target_ip,
+        "matches_target": matches,
+        "warnings": warnings,
+    }
+
+
+def _hostinger_headers(api_token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+
+def _relative_record_name(domain: str, zone_domain: str) -> str:
+    if domain == zone_domain:
+        return "@"
+    suffix = f".{zone_domain}"
+    if not domain.endswith(suffix):
+        raise ValueError("domain must match hostinger_zone_domain or be a subdomain of it.")
+    return domain[: -len(suffix)]
+
+
+def _build_hostinger_dns_request(
+    *,
+    domain: str,
+    zone_domain: str,
+    target_ip: str,
+    include_www_alias: bool,
+) -> dict[str, Any]:
+    record_name = _relative_record_name(domain, zone_domain)
+    zone = [
+        {
+            "name": record_name,
+            "records": [{"content": target_ip}],
+            "ttl": 300,
+            "type": "A",
+        }
+    ]
+    if include_www_alias and record_name == "@":
+        zone.append(
+            {
+                "name": "www",
+                "records": [{"content": domain}],
+                "ttl": 300,
+                "type": "CNAME",
+            }
+        )
+    return {"overwrite": False, "zone": zone}
+
+
+def _sync_hostinger_dns(
+    *,
+    domain: str,
+    zone_domain: str,
+    target_ip: str,
+    api_token: str,
+    include_www_alias: bool,
+) -> dict[str, Any]:
+    settings = get_settings()
+    payload = _build_hostinger_dns_request(
+        domain=domain,
+        zone_domain=zone_domain,
+        target_ip=target_ip,
+        include_www_alias=include_www_alias,
+    )
+    base_url = settings.hostinger_api_base_url.rstrip("/")
+    headers = _hostinger_headers(api_token)
+
+    with httpx.Client(timeout=20.0, headers=headers) as client:
+        validate_response = client.post(f"{base_url}/api/dns/v1/zones/{zone_domain}/validate", json=payload)
+        if validate_response.status_code != 200:
+            raise RuntimeError(
+                f"Hostinger DNS validation failed: {validate_response.status_code} {validate_response.text[:1000]}"
+            )
+
+        update_response = client.put(f"{base_url}/api/dns/v1/zones/{zone_domain}", json=payload)
+        if update_response.status_code != 200:
+            raise RuntimeError(
+                f"Hostinger DNS update failed: {update_response.status_code} {update_response.text[:1000]}"
+            )
+
+    return {
+        "checked": True,
+        "updated": True,
+        "zone_domain": zone_domain,
+        "payload": payload,
+    }
 
 
 def _connect_ssh(
