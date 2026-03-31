@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..database import get_db
 from ..models import Note, User
-from ..schemas import DeployInDockerRequest, NoteCreateRequest, UserOut
+from ..schemas import DeployInDockerRequest, MapDomainRequest, NoteCreateRequest, UserOut
 from ..services.local_mcp_service import load_messages, run_local_mcp_tool
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -78,4 +78,21 @@ def internal_deploy_in_docker(payload: DeployInDockerRequest):
 
     if not isinstance(result, dict):
         raise HTTPException(status_code=502, detail="Unexpected non-dict response from deploy_inDocker")
+    return result
+
+
+@router.post("/domain-mappings", dependencies=[Depends(verify_mcp_key)])
+def internal_map_domain(payload: MapDomainRequest):
+    try:
+        result = run_local_mcp_tool(
+            "map_domain",
+            payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=502, detail="Unexpected non-dict response from map_domain")
     return result
