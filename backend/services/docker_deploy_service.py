@@ -202,6 +202,8 @@ def map_domain_to_deployment(
     if not resolved_dns_target_ip:
         raise ValueError("dns_target_ip could not be resolved.")
 
+    resolved_hostinger_api_token = (hostinger_api_token or settings.hostinger_api_token).strip()
+
     # ── STEP 1: Hostinger DNS sync (before anything else so propagation starts) ──
     hostinger_result: dict[str, Any] = {
         "checked": False,
@@ -209,13 +211,13 @@ def map_domain_to_deployment(
         "zone_domain": resolved_zone_domain,
         "skipped_reason": None,
     }
-    if hostinger_api_token.strip():
+    if resolved_hostinger_api_token:
         try:
             hostinger_result = _sync_hostinger_dns(
                 domain=normalized_domain,
                 zone_domain=resolved_zone_domain,
                 target_ip=resolved_dns_target_ip,
-                api_token=hostinger_api_token,
+                api_token=resolved_hostinger_api_token,
                 include_www_alias=include_www_alias,
             )
             steps.append({"step": "hostinger_dns_sync", "status": "ok"})
