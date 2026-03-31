@@ -1,83 +1,25 @@
-# Tic Tac Toe Web Game
+# ⚡ Tic-Tac-Toe Web App
 
-A modern tic-tac-toe web application built with FastAPI backend and React JSX frontend.
+A full-stack Tic-Tac-Toe game built with **FastAPI** (backend) and **React JSX** (frontend), served in a single Docker container.
 
-## Features
-
-- 🎮 Interactive tic-tac-toe gameplay
-- 📊 Score tracking for X, O, and draws
-- 🎨 Beautiful responsive UI
-- 🚀 Fast API backend with CORS enabled
-- 📱 Mobile-friendly design
-
-## Project Structure
-
-```
-├── backend/
-│   └── backend.py          # FastAPI application
-├── frontend/
-│   ├── index.html          # HTML entry point
-│   ├── app.jsx             # React component
-│   └── style.css           # Styling
-├── requirements.txt        # Python dependencies
-├── Dockerfile              # Docker configuration
-└── README.md              # This file
-```
-
-## Installation
-
-### Local Development
-
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Run the server:**
-   ```bash
-   uvicorn backend.backend:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-3. **Open in browser:**
-   ```
-   http://localhost:8000
-   ```
-
-## Docker Deployment
-
-1. **Build the image:**
-   ```bash
-   docker build -t tic-tac-toe .
-   ```
-
-2. **Run the container:**
-   ```bash
-   docker run -p 8000:8000 tic-tac-toe
-   ```
+## Stack
+- **Backend**: FastAPI + Uvicorn
+- **Frontend**: React 18 (CDN, in-browser Babel)
+- **Container**: Docker (python:3.10-slim)
 
 ## API Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Serve frontend |
+| GET | `/health` | Health check |
+| GET | `/state` | Get game state |
+| POST | `/start` | Start/reset game |
+| POST | `/move` | Make a move `{index: 0-8}` |
+| GET | `/docs` | Swagger UI |
 
-- `GET /` - Health check
-- `GET /state` - Get current game state
-- `POST /move` - Make a move (position: 0-8)
-- `POST /reset` - Reset the board
-- `POST /reset-scores` - Reset all scores
-- `GET /docs` - FastAPI interactive documentation
-
-## Game Rules
-
-- Players take turns marking X and O
-- First player to get 3 in a row (horizontally, vertically, or diagonally) wins
-- If all 9 squares are filled with no winner, it's a draw
-- Scores are tracked across multiple games
-
-## Technologies
-
-- **Backend:** FastAPI, Uvicorn
-- **Frontend:** React 18, JSX
-- **Deployment:** Docker, Docker Compose
-- **Server:** Python 3.10
-
-## License
-
-MIT
+## Run Locally
+```bash
+docker build -t tictactoe .
+docker run -p 8000:8000 tictactoe
+```
+Open: http://localhost:8000
