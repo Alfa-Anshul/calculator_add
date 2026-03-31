@@ -220,6 +220,104 @@ def _parse_github_repo(repo_url: str) -> tuple[str, str]:
     return owner, repo
 
 
+def _github_api_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _github_api_error_message(response: httpx.Response, default_message: str) -> str:
+    detail = ""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict):
+        detail = str(payload.get("message") or "").strip()
+        raw_errors = payload.get("errors")
+        if isinstance(raw_errors, list):
+            extra_details: list[str] = []
+            for item in raw_errors[:3]:
+                if isinstance(item, dict):
+                    value = str(item.get("message") or item.get("code") or item.get("field") or "").strip()
+                else:
+                    value = str(item).strip()
+                if value:
+                    extra_details.append(value)
+            if extra_details:
+                detail = f"{detail} ({'; '.join(extra_details)})" if detail else "; ".join(extra_details)
+
+    if not detail:
+        detail = response.text[:500].strip()
+
+    if detail:
+        return f"{default_message}: {detail}"
+    return default_message
+
+
+def _create_github_repo(
+    *,
+    name: str,
+    token: str,
+    owner: str | None = None,
+    description: str = "",
+    public: bool = True,
+    auto_init: bool = False,
+    homepage: str | None = None,
+) -> dict[str, Any]:
+    repo_name = name.strip()
+    if not repo_name:
+        raise ValueError("name is required to create a GitHub repository.")
+
+    owner_name = (owner or "").strip() or None
+    payload: dict[str, Any] = {
+        "name": repo_name,
+        "description": description.strip(),
+        "private": not public,
+        "auto_init": auto_init,
+    }
+    homepage_url = (homepage or "").strip()
+    if homepage_url:
+        payload["homepage"] = homepage_url
+
+    endpoint = "https://api.github.com/user/repos"
+    if owner_name:
+        endpoint = f"https://api.github.com/orgs/{owner_name}/repos"
+
+    with httpx.Client(timeout=30.0, headers=_github_api_headers(token)) as client:
+        response = client.post(endpoint, json=payload)
+
+    if response.status_code == 201:
+        data = response.json()
+        return {
+            "created": True,
+            "github_repo_url": str(data.get("html_url") or ""),
+            "clone_url": str(data.get("clone_url") or ""),
+            "ssh_url": str(data.get("ssh_url") or ""),
+            "owner": str((data.get("owner") or {}).get("login") or owner_name or ""),
+            "name": str(data.get("name") or repo_name),
+            "full_name": str(data.get("full_name") or ""),
+            "private": bool(data.get("private", not public)),
+            "default_branch": str(data.get("default_branch") or "main"),
+        }
+
+    if response.status_code == 401:
+        raise ValueError("GitHub token is invalid or expired.")
+    if response.status_code == 403:
+        raise ValueError(_github_api_error_message(response, "GitHub refused repository creation"))
+    if response.status_code == 422:
+        raise ValueError(
+            _github_api_error_message(
+                response,
+                "GitHub repository could not be created. It may already exist or the name may be invalid",
+            )
+        )
+    raise RuntimeError(_github_api_error_message(response, "GitHub repository creation failed"))
+
+
 def _push_to_github_via_api(
     *,
     project_dir: Path,
@@ -230,14 +328,18 @@ def _push_to_github_via_api(
 ) -> dict[str, Any]:
     owner, repo = _parse_github_repo(repo_url)
     api_base = f"https://api.github.com/repos/{owner}/{repo}/contents"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
 
     uploaded_files = 0
-    with httpx.Client(timeout=30.0, headers=headers) as client:
+    with httpx.Client(timeout=30.0, headers=_github_api_headers(token)) as client:
+        repo_response = client.get(f"https://api.github.com/repos/{owner}/{repo}")
+        if repo_response.status_code == 404:
+            raise ValueError(
+                "GitHub repository was not found or this token cannot access it. Create it first with create_repo "
+                "or provide an existing github_repo_url."
+            )
+        if repo_response.status_code not in {200}:
+            raise RuntimeError(_github_api_error_message(repo_response, "GitHub repository lookup failed"))
+
         for path in sorted(project_dir.rglob("*")):
             if not path.is_file():
                 continue
@@ -268,7 +370,10 @@ def _push_to_github_via_api(
             put_resp = client.put(endpoint, json=payload)
             if put_resp.status_code not in {200, 201}:
                 raise RuntimeError(
-                    f"GitHub API upload failed for {relative_path}: {put_resp.status_code}"
+                    _github_api_error_message(
+                        put_resp,
+                        f"GitHub API upload failed for {relative_path}",
+                    )
                 )
             uploaded_files += 1
 
@@ -447,6 +552,43 @@ def run_local_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, A
             "files": len(normalized_files),
             "directories": len(directories),
         }
+
+    if tool_name == "create_repo":
+        repo_name = str(arguments.get("name") or "").strip()
+        owner = str(arguments.get("owner") or "").strip() or None
+        description = str(arguments.get("description") or "")
+        homepage = str(arguments.get("homepage") or "").strip() or None
+        public = bool(arguments.get("public", True))
+        auto_init = bool(arguments.get("auto_init", False))
+        token = _resolve_github_token(arguments.get("github_token"))
+        result = _create_github_repo(
+            name=repo_name,
+            token=token,
+            owner=owner,
+            description=description,
+            public=public,
+            auto_init=auto_init,
+            homepage=homepage,
+        )
+
+        safe_payload = {
+            "repo": {
+                "name": repo_name,
+                "owner": owner,
+                "description": description,
+                "homepage": homepage,
+                "public": public,
+                "auto_init": auto_init,
+                "github_repo_url": result["github_repo_url"],
+            }
+        }
+        record, count = store_message_record(
+            json.dumps(safe_payload, ensure_ascii=True, indent=2),
+            source="local-mcp:create_repo",
+        )
+        result["record_id"] = record["id"]
+        result["count"] = count
+        return result
 
     if tool_name in {"github_integretion", "save_and_push_project_scaffold"}:
         root, directories, normalized_files = _normalize_scaffold_input(arguments)
