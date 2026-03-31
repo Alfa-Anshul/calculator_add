@@ -60,7 +60,7 @@ def read_message() -> dict[str, Any]:
 
 
 @fast_mcp.tool(
-    description="Save a structured project scaffold payload, and optionally push it when github_repo_url is provided."
+    description="Save a structured project scaffold payload, and optionally push it when github_repo_url is provided. Use create_repo first if the repository does not exist yet."
 )
 def save_project_scaffold(
     files: list[dict[str, Any]],
@@ -89,7 +89,36 @@ def save_project_scaffold(
 
 
 @fast_mcp.tool(
-    description="Save scaffold files locally and push the generated project to GitHub using GITHUB_TOKEN from runtime environment or .env."
+    description="Create a GitHub repository using GITHUB_TOKEN from runtime environment or .env. Repositories are public by default."
+)
+def create_repo(
+    name: str,
+    owner: str | None = None,
+    description: str = "",
+    homepage: str | None = None,
+    public: bool = True,
+    auto_init: bool = False,
+    github_token: str | None = None,
+) -> dict[str, Any]:
+    result = run_local_mcp_tool(
+        "create_repo",
+        {
+            "name": name,
+            "owner": owner,
+            "description": description,
+            "homepage": homepage,
+            "public": public,
+            "auto_init": auto_init,
+            "github_token": github_token,
+        },
+    )
+    if not isinstance(result, dict):
+        raise ValueError("Unexpected non-dict response from create_repo")
+    return result
+
+
+@fast_mcp.tool(
+    description="Save scaffold files locally and push the generated project to GitHub using GITHUB_TOKEN from runtime environment or .env. Use create_repo first if the repository does not exist yet."
 )
 def github_integretion(
     files: list[dict[str, Any]],
