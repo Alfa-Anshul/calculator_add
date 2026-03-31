@@ -173,6 +173,33 @@ TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "map_domain",
+        "description": "Map a deployed Dockerized FastAPI app to a domain using nginx, optionally issue TLS certificates, and optionally sync DNS records through the Hostinger API.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "minLength": 1},
+                "container_name": {"type": "string", "minLength": 1},
+                "port": {"type": "integer", "minimum": 1},
+                "docs_path": {"type": "string", "minLength": 1},
+                "deploy_ssh_host": {"type": "string", "minLength": 1},
+                "deploy_ssh_user": {"type": "string", "minLength": 1},
+                "deploy_ssh_port": {"type": "integer", "minimum": 1},
+                "deploy_ssh_key_path": {"type": "string", "minLength": 1},
+                "deploy_ssh_private_key": {"type": "string", "minLength": 1},
+                "deploy_docker_command": {"type": "string", "minLength": 1},
+                "certbot_email": {"type": "string", "minLength": 1},
+                "hostinger_api_token": {"type": "string", "minLength": 1},
+                "hostinger_zone_domain": {"type": "string", "minLength": 1},
+                "dns_target_ip": {"type": "string", "minLength": 1},
+                "include_www_alias": {"type": "boolean"},
+                "enable_https": {"type": "boolean"}
+            },
+            "required": ["domain"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -328,6 +355,13 @@ async def deploy_inDocker(payload: dict[str, Any], __: Session | None = None) ->
     return result
 
 
+async def map_domain(payload: dict[str, Any], __: Session | None = None) -> dict[str, Any]:
+    result = run_local_mcp_tool("map_domain", payload)
+    if not isinstance(result, dict):
+        raise ValueError("Unexpected non-dict response from map_domain")
+    return result
+
+
 async def save_and_push_project_scaffold(payload: dict[str, Any], __: Session | None = None) -> dict[str, Any]:
     return await github_integretion(payload, __)
 
@@ -342,6 +376,7 @@ TOOL_REGISTRY: dict[str, Callable[[dict[str, Any], Session | None], Awaitable[di
     "save_project_scaffold": save_project_scaffold,
     "github_integretion": github_integretion,
     "deploy_inDocker": deploy_inDocker,
+    "map_domain": map_domain,
     "save_and_push_project_scaffold": save_and_push_project_scaffold,
 }
 
