@@ -156,6 +156,53 @@ def deploy_inDocker(
     return result
 
 
+@fast_mcp.tool(
+    description="Map a deployed Dockerized app to a domain using nginx, optionally issue TLS certificates, and optionally sync DNS records through Hostinger."
+)
+def map_domain(
+    domain: str,
+    container_name: str | None = None,
+    port: int | None = None,
+    docs_path: str = "/docs",
+    deploy_ssh_host: str | None = None,
+    deploy_ssh_user: str | None = None,
+    deploy_ssh_port: int | None = None,
+    deploy_ssh_key_path: str | None = None,
+    deploy_ssh_private_key: str | None = None,
+    deploy_docker_command: str | None = None,
+    certbot_email: str | None = None,
+    hostinger_api_token: str | None = None,
+    hostinger_zone_domain: str | None = None,
+    dns_target_ip: str | None = None,
+    include_www_alias: bool = True,
+    enable_https: bool = True,
+) -> dict[str, Any]:
+    result = run_local_mcp_tool(
+        "map_domain",
+        {
+            "domain": domain,
+            "container_name": container_name,
+            "port": port,
+            "docs_path": docs_path,
+            "deploy_ssh_host": deploy_ssh_host,
+            "deploy_ssh_user": deploy_ssh_user,
+            "deploy_ssh_port": deploy_ssh_port,
+            "deploy_ssh_key_path": deploy_ssh_key_path,
+            "deploy_ssh_private_key": deploy_ssh_private_key,
+            "deploy_docker_command": deploy_docker_command,
+            "certbot_email": certbot_email,
+            "hostinger_api_token": hostinger_api_token,
+            "hostinger_zone_domain": hostinger_zone_domain,
+            "dns_target_ip": dns_target_ip,
+            "include_www_alias": include_www_alias,
+            "enable_https": enable_https,
+        },
+    )
+    if not isinstance(result, dict):
+        raise ValueError("Unexpected non-dict response from map_domain")
+    return result
+
+
 def save_and_push_project_scaffold(
     files: list[dict[str, Any]],
     github_repo_url: str,
