@@ -11,7 +11,7 @@ from uuid import uuid4
 import httpx
 
 from ..config import get_settings
-from .docker_deploy_service import deploy_repo_in_docker
+from .docker_deploy_service import deploy_repo_in_docker, map_domain_to_deployment
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 MESSAGES_FILE = BASE_DIR / "messages.json"
@@ -553,6 +553,71 @@ def run_local_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, A
         record, count = store_message_record(
             json.dumps(safe_payload, ensure_ascii=True, indent=2),
             source="local-mcp:deploy_inDocker",
+        )
+        result["record_id"] = record["id"]
+        result["count"] = count
+        return result
+
+    if tool_name == "map_domain":
+        domain = str(arguments.get("domain") or "").strip()
+        container_name = str(arguments.get("container_name") or "").strip() or None
+        port_raw = arguments.get("port")
+        port = int(port_raw) if port_raw not in (None, "") else None
+        docs_path = str(arguments.get("docs_path") or "/docs").strip() or "/docs"
+        deploy_ssh_host = str(arguments.get("deploy_ssh_host") or "").strip() or None
+        deploy_ssh_user = str(arguments.get("deploy_ssh_user") or "").strip() or None
+        deploy_ssh_port_raw = arguments.get("deploy_ssh_port")
+        deploy_ssh_port = int(deploy_ssh_port_raw) if deploy_ssh_port_raw not in (None, "") else None
+        deploy_ssh_key_path = str(arguments.get("deploy_ssh_key_path") or "").strip() or None
+        deploy_ssh_private_key = str(arguments.get("deploy_ssh_private_key") or "") or None
+        deploy_docker_command = str(arguments.get("deploy_docker_command") or "").strip() or None
+        certbot_email = str(arguments.get("certbot_email") or "").strip() or None
+        hostinger_api_token = str(arguments.get("hostinger_api_token") or "")
+        hostinger_zone_domain = str(arguments.get("hostinger_zone_domain") or "").strip() or None
+        dns_target_ip = str(arguments.get("dns_target_ip") or "").strip() or None
+        include_www_alias = bool(arguments.get("include_www_alias", True))
+        enable_https = bool(arguments.get("enable_https", True))
+
+        result = map_domain_to_deployment(
+            domain=domain,
+            container_name=container_name,
+            port=port,
+            docs_path=docs_path,
+            deploy_ssh_host=deploy_ssh_host,
+            deploy_ssh_user=deploy_ssh_user,
+            deploy_ssh_port=deploy_ssh_port,
+            deploy_ssh_key_path=deploy_ssh_key_path,
+            deploy_ssh_private_key=deploy_ssh_private_key,
+            deploy_docker_command=deploy_docker_command,
+            certbot_email=certbot_email,
+            hostinger_api_token=hostinger_api_token,
+            hostinger_zone_domain=hostinger_zone_domain,
+            dns_target_ip=dns_target_ip,
+            include_www_alias=include_www_alias,
+            enable_https=enable_https,
+        )
+
+        safe_payload = {
+            "domain": {
+                "domain": domain,
+                "container_name": container_name,
+                "port": port,
+                "docs_path": docs_path,
+                "deploy_ssh_host": deploy_ssh_host,
+                "deploy_ssh_user": deploy_ssh_user,
+                "deploy_ssh_port": deploy_ssh_port,
+                "deploy_ssh_key_path": deploy_ssh_key_path,
+                "deploy_docker_command": deploy_docker_command,
+                "certbot_email": certbot_email,
+                "hostinger_zone_domain": hostinger_zone_domain,
+                "dns_target_ip": dns_target_ip,
+                "include_www_alias": include_www_alias,
+                "enable_https": enable_https,
+            }
+        }
+        record, count = store_message_record(
+            json.dumps(safe_payload, ensure_ascii=True, indent=2),
+            source="local-mcp:map_domain",
         )
         result["record_id"] = record["id"]
         result["count"] = count
