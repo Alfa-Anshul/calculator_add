@@ -1,105 +1,94 @@
-const { useState, useEffect, useCallback } = React;
+const API = '';
 
-const GRID_SIZE = 20;
-const CELL_SIZE = 24;
-const API = "";
+function Cell({ value, onClick, isWinning }) {
+  return (
+    <button
+      className={`cell ${value === 'X' ? 'cell-x' : value === 'O' ? 'cell-o' : ''} ${isWinning ? 'cell-win' : ''}`}
+      onClick={onClick}
+    >
+      {value}
+    </button>
+  );
+}
 
-function App() {
-  const [state, setState] = useState(null);
-  const [started, setStarted] = useState(false);
-  const [loading, setLoading] = useState(false);
+function Board() {
+  const [state, setState] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [winCells, setWinCells] = React.useState([]);
 
-  const fetchState = async () => {
+  const WINNING_COMBOS = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6]
+  ];
+
+  function findWinCells(board) {
+    for (const combo of WINNING_COMBOS) {
+      const [a,b,c] = combo;
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) return combo;
+    }
+    return [];
+  }
+
+  async function fetchState() {
     const res = await fetch(`${API}/state`);
     const data = await res.json();
-    setState(data.state);
-  };
+    setState(data);
+    setWinCells(findWinCells(data.board));
+  }
 
-  const startGame = async () => {
+  async function makeMove(idx) {
+    if (loading || !state || state.game_over || state.board[idx]) return;
     setLoading(true);
-    const res = await fetch(`${API}/start`, { method: "POST" });
-    const data = await res.json();
-    setState(data.state);
-    setStarted(true);
-    setLoading(false);
-  };
-
-  const move = useCallback(async (dir) => {
-    if (!started || state?.game_over) return;
     const res = await fetch(`${API}/move`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ direction: dir }),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index: idx })
     });
     const data = await res.json();
-    setState(data.state);
-  }, [started, state]);
+    setState(data);
+    setWinCells(findWinCells(data.board));
+    setLoading(false);
+  }
 
-  useEffect(() => {
-    const handler = (e) => {
-      const map = { ArrowUp: "UP", ArrowDown: "DOWN", ArrowLeft: "LEFT", ArrowRight: "RIGHT" };
-      if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [move]);
+  async function resetGame() {
+    const res = await fetch(`${API}/reset`, { method: 'POST' });
+    const data = await res.json();
+    setState(data);
+    setWinCells([]);
+  }
 
-  useEffect(() => {
-    if (!started || state?.game_over) return;
-    const interval = setInterval(() => {
-      fetch(`${API}/move`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ direction: state?.direction || "RIGHT" }),
-      }).then(r => r.json()).then(d => setState(d.state));
-    }, 200);
-    return () => clearInterval(interval);
-  }, [started, state?.game_over, state?.direction]);
+  React.useEffect(() => { fetchState(); }, []);
 
-  const snakeSet = new Set((state?.snake || []).map(([r, c]) => `${r},${c}`));
-  const isHead = state?.snake?.[0];
-  const food = state?.food;
+  if (!state) return <div className="loading">Loading game...</div>;
+
+  const statusMsg = state.game_over
+    ? state.winner === 'Draw' ? "It's a Draw! 🤝" : `Player ${state.winner} Wins! 🎉`
+    : `Player ${state.current_player}'s Turn`;
 
   return (
     <div className="container">
-      <h1>🐍 Snake Game</h1>
-      <div className="score-bar">
-        <span>Score: <strong>{state?.score ?? 0}</strong></span>
-        {state?.game_over && <span className="game-over">GAME OVER!</span>}
+      <h1 className="title">Tic-Tac-Toe</h1>
+      <div className="scoreboard">
+        <div className="score score-x">X: {state.scores.X}</div>
+        <div className="score score-draw">Draws: {state.scores.draws}</div>
+        <div className="score score-o">O: {state.scores.O}</div>
       </div>
-
-      <div className="board" style={{ width: GRID_SIZE * CELL_SIZE, height: GRID_SIZE * CELL_SIZE }}>
-        {Array.from({ length: GRID_SIZE }).map((_, row) =>
-          Array.from({ length: GRID_SIZE }).map((_, col) => {
-            const key = `${row},${col}`;
-            const isSnake = snakeSet.has(key);
-            const isHeadCell = isHead && isHead[0] === row && isHead[1] === col;
-            const isFood = food && food[0] === row && food[1] === col;
-            return (
-              <div
-                key={key}
-                className={`cell ${isHeadCell ? 'head' : isSnake ? 'snake' : ''} ${isFood ? 'food' : ''}`}
-                style={{ width: CELL_SIZE, height: CELL_SIZE, left: col * CELL_SIZE, top: row * CELL_SIZE }}
-              />
-            );
-          })
-        )}
+      <div className={`status ${state.game_over ? 'status-over' : ''}`}>{statusMsg}</div>
+      <div className="board">
+        {state.board.map((cell, i) => (
+          <Cell
+            key={i}
+            value={cell}
+            isWinning={winCells.includes(i)}
+            onClick={() => makeMove(i)}
+          />
+        ))}
       </div>
-
-      <div className="controls">
-        <div className="row"><button onClick={() => move("UP")}>▲ Up</button></div>
-        <div className="row">
-          <button onClick={() => move("LEFT")}>◀ Left</button>
-          <button onClick={() => move("DOWN")}>▼ Down</button>
-          <button onClick={() => move("RIGHT")}>Right ▶</button>
-        </div>
-      </div>
-
-      <button className="start-btn" onClick={startGame} disabled={loading}>
-        {loading ? "Starting..." : started ? "Restart" : "Start Game"}
-      </button>
+      <button className="reset-btn" onClick={resetGame}>New Game</button>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<Board />);
