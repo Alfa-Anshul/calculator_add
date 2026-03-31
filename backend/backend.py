@@ -1,89 +1,137 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
+import json
 import os
+from typing import List, Optional
 
-app = FastAPI(title="Tic-Tac-Toe API")
+app = FastAPI(title="Tic Tac Toe API", version="1.0.0")
 
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Game State ---
+# Game state storage (in-memory)
 game_state = {
-    "board": [""] * 9,
+    "board": [None] * 9,
     "current_player": "X",
-    "winner": None,
     "game_over": False,
-    "scores": {"X": 0, "O": 0, "draws": 0},
+    "winner": None,
+    "x_score": 0,
+    "o_score": 0,
+    "draws": 0
 }
 
+# Winning combinations
 WINNING_COMBOS = [
-    [0,1,2],[3,4,5],[6,7,8],
-    [0,3,6],[1,4,7],[2,5,8],
-    [0,4,8],[2,4,6]
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8],
+    [0, 4, 8],
+    [2, 4, 6]
 ]
 
-def check_winner(board):
+def check_winner(board: List) -> Optional[str]:
+    """Check if there's a winner."""
     for combo in WINNING_COMBOS:
-        a, b, c = combo
-        if board[a] and board[a] == board[b] == board[c]:
-            return board[a]
+        if board[combo[0]] and board[combo[0]] == board[combo[1]] == board[combo[2]]:
+            return board[combo[0]]
     return None
 
-class MoveRequest(BaseModel):
-    index: int
+def check_draw(board: List) -> bool:
+    """Check if the game is a draw."""
+    return None not in board
 
 @app.get("/")
-def health_check():
-    return {"status": "ok", "message": "Tic-Tac-Toe API running"}
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "message": "Tic Tac Toe API is running"}
 
 @app.get("/state")
-def get_state():
+async def get_state():
+    """Get current game state."""
     return game_state
 
 @app.post("/move")
-def make_move(req: MoveRequest):
+async def make_move(position: int):
+    """Make a move on the board."""
+    if position < 0 or position > 8:
+        return {"error": "Invalid position", "status": "error"}
+    
+    if game_state["board"][position] is not None:
+        return {"error": "Position already taken", "status": "error"}
+    
     if game_state["game_over"]:
-        return {"error": "Game is over. Reset to play again.", **game_state}
-    if game_state["board"][req.index] != "":
-        return {"error": "Cell already occupied.", **game_state}
+        return {"error": "Game is over", "status": "error"}
     
-    game_state["board"][req.index] = game_state["current_player"]
+    # Make the move
+    game_state["board"][position] = game_state["current_player"]
+    
+    # Check for winner
     winner = check_winner(game_state["board"])
-    
     if winner:
+        game_state["game_over"] = True
         game_state["winner"] = winner
-        game_state["game_over"] = True
-        game_state["scores"][winner] += 1
-    elif "" not in game_state["board"]:
-        game_state["game_over"] = True
-        game_state["winner"] = "Draw"
-        game_state["scores"]["draws"] += 1
-    else:
-        game_state["current_player"] = "O" if game_state["current_player"] == "X" else "X"
+        if winner == "X":
+            game_state["x_score"] += 1
+        else:
+            game_state["o_score"] += 1
+        return {"status": "win", "winner": winner, "game_state": game_state}
     
-    return game_state
+    # Check for draw
+    if check_draw(game_state["board"]):
+        game_state["game_over"] = True
+        game_state["draws"] += 1
+        return {"status": "draw", "game_state": game_state}
+    
+    # Switch player
+    game_state["current_player"] = "O" if game_state["current_player"] == "X" else "X"
+    
+    return {"status": "ok", "game_state": game_state}
 
 @app.post("/reset")
-def reset_game():
-    game_state["board"] = [""] * 9
+async def reset_game():
+    """Reset the game board."""
+    x_score = game_state["x_score"]
+    o_score = game_state["o_score"]
+    draws = game_state["draws"]
+    
+    game_state["board"] = [None] * 9
     game_state["current_player"] = "X"
-    game_state["winner"] = None
     game_state["game_over"] = False
-    return game_state
+    game_state["winner"] = None
+    game_state["x_score"] = x_score
+    game_state["o_score"] = o_score
+    game_state["draws"] = draws
+    
+    return {"status": "reset", "game_state": game_state}
 
-# Serve frontend static files
-frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
-if os.path.exists(frontend_path):
-    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+@app.post("/reset-scores")
+async def reset_scores():
+    """Reset all scores."""
+    game_state["board"] = [None] * 9
+    game_state["current_player"] = "X"
+    game_state["game_over"] = False
+    game_state["winner"] = None
+    game_state["x_score"] = 0
+    game_state["o_score"] = 0
+    game_state["draws"] = 0
+    
+    return {"status": "scores_reset", "game_state": game_state}
 
-    @app.get("/app", include_in_schema=False)
-    def serve_frontend():
-        return FileResponse(os.path.join(frontend_path, "index.html"))
+# Serve static files
+if os.path.exists("frontend"):
+    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
