@@ -1,20 +1,20 @@
-# ⚡ Tic-Tac-Toe Web App
+# Tic-Tac-Toe Web App
 
-A full-stack Tic-Tac-Toe game built with **FastAPI** (backend) and **React JSX** (frontend), served in a single Docker container.
+Full-stack Tic-Tac-Toe game built with **FastAPI** (backend) + **React JSX** (frontend), containerized with Docker.
 
 ## Stack
-- **Backend**: FastAPI + Uvicorn
-- **Frontend**: React 18 (CDN, in-browser Babel)
-- **Container**: Docker (python:3.10-slim)
+- Backend: FastAPI + Uvicorn
+- Frontend: React 18 (CDN, no build step) + Babel standalone
+- Container: Python 3.10-slim Docker
 
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/` | Serve frontend |
+| GET | `/` | Serves frontend |
 | GET | `/health` | Health check |
-| GET | `/state` | Get game state |
-| POST | `/start` | Start/reset game |
-| POST | `/move` | Make a move `{index: 0-8}` |
+| GET | `/state` | Current game state |
+| POST | `/start` | Reset/start new game |
+| POST | `/move` | Make a move `{"index": 0-8}` |
 | GET | `/docs` | Swagger UI |
 
 ## Run Locally
@@ -23,3 +23,12 @@ docker build -t tictactoe .
 docker run -p 8000:8000 tictactoe
 ```
 Open: http://localhost:8000
+
+## Board Index Map
+```
+0 | 1 | 2
+---------
+3 | 4 | 5
+---------
+6 | 7 | 8
+```
