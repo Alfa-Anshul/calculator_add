@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     deploy_port_start: int = 8600
     deploy_port_end: int = 8699
     deploy_docker_command: str = "docker"
+    deploy_certbot_email: str = ""
+    hostinger_api_base_url: str = "https://developers.hostinger.com"
 
     oauth_introspection_url: str = ""
     oauth_client_id: str = ""
