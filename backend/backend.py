@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import random
 
-app = FastAPI(title="Snake Game")
+app = FastAPI(title="Snake Game API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,81 +17,87 @@ app.add_middleware(
 GRID_SIZE = 20
 
 game_state = {
-    "snake": [(10, 10), (10, 9), (10, 8)],
-    "food": (5, 5),
+    "snake": [],
+    "food": None,
     "direction": "RIGHT",
     "score": 0,
     "game_over": False,
     "started": False,
 }
 
-def spawn_food(snake):
+
+def random_food(snake):
     while True:
-        pos = (random.randint(0, GRID_SIZE - 1), random.randint(0, GRID_SIZE - 1))
+        pos = [random.randint(0, GRID_SIZE - 1), random.randint(0, GRID_SIZE - 1)]
         if pos not in snake:
             return pos
 
-@app.get("/")
-def health():
-    return {"status": "Snake Game API running"}
-
-@app.post("/start")
-def start_game():
-    global game_state
-    snake = [(10, 10), (10, 9), (10, 8)]
-    game_state = {
-        "snake": snake,
-        "food": spawn_food(snake),
-        "direction": "RIGHT",
-        "score": 0,
-        "game_over": False,
-        "started": True,
-    }
-    return game_state
 
 class MoveRequest(BaseModel):
     direction: str
 
+
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "Snake Game API running"}
+
+
+@app.post("/start")
+def start_game():
+    mid = GRID_SIZE // 2
+    snake = [[mid, mid], [mid, mid - 1], [mid, mid - 2]]
+    game_state.update({
+        "snake": snake,
+        "food": random_food(snake),
+        "direction": "RIGHT",
+        "score": 0,
+        "game_over": False,
+        "started": True,
+    })
+    return {"status": "started", "state": game_state}
+
+
 @app.post("/move")
 def move_snake(req: MoveRequest):
-    global game_state
-    if game_state["game_over"] or not game_state["started"]:
-        return game_state
+    if not game_state["started"] or game_state["game_over"]:
+        return {"error": "Game not active", "state": game_state}
 
     direction = req.direction.upper()
-    opposite = {"UP": "DOWN", "DOWN": "UP", "LEFT": "RIGHT", "RIGHT": "LEFT"}
-    if direction in opposite and opposite[direction] != game_state["direction"]:
+    opposites = {"UP": "DOWN", "DOWN": "UP", "LEFT": "RIGHT", "RIGHT": "LEFT"}
+    if direction in opposites and opposites[direction] != game_state["direction"]:
         game_state["direction"] = direction
 
-    head = game_state["snake"][0]
+    head = game_state["snake"][0][:]
     d = game_state["direction"]
-    if d == "UP":    new_head = (head[0] - 1, head[1])
-    elif d == "DOWN":  new_head = (head[0] + 1, head[1])
-    elif d == "LEFT":  new_head = (head[0], head[1] - 1)
-    else:              new_head = (head[0], head[1] + 1)
+    if d == "UP":    head[0] -= 1
+    elif d == "DOWN":  head[0] += 1
+    elif d == "LEFT":  head[1] -= 1
+    elif d == "RIGHT": head[1] += 1
 
     # Wall collision
-    if not (0 <= new_head[0] < GRID_SIZE and 0 <= new_head[1] < GRID_SIZE):
+    if head[0] < 0 or head[0] >= GRID_SIZE or head[1] < 0 or head[1] >= GRID_SIZE:
         game_state["game_over"] = True
-        return game_state
+        return {"state": game_state}
 
     # Self collision
-    if new_head in game_state["snake"]:
+    if head in game_state["snake"]:
         game_state["game_over"] = True
-        return game_state
+        return {"state": game_state}
 
-    game_state["snake"] = [new_head] + game_state["snake"]
+    game_state["snake"].insert(0, head)
 
-    if new_head == game_state["food"]:
+    if head == game_state["food"]:
         game_state["score"] += 10
-        game_state["food"] = spawn_food(game_state["snake"])
+        game_state["food"] = random_food(game_state["snake"])
     else:
         game_state["snake"].pop()
 
-    return game_state
+    return {"state": game_state}
+
 
 @app.get("/state")
 def get_state():
-    return game_state
+    return {"state": game_state}
+
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
