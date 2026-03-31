@@ -177,7 +177,16 @@ def map_domain_to_deployment(
     include_www_alias: bool = True,
     enable_https: bool = True,
 ) -> dict[str, Any]:
+    """
+    Full domain mapping flow:
+      1. Sync Hostinger DNS (if token provided) — FIRST so propagation starts early
+      2. Wait for DNS propagation to the server IP
+      3. Install nginx + write reverse-proxy config
+      4. Run certbot for TLS ONLY after DNS is confirmed pointing to the server
+      5. Return full status including warnings for every step that was skipped/failed
+    """
     settings = get_settings()
+    steps: list[dict[str, Any]] = []
 
     normalized_domain = _normalize_domain(domain)
     normalized_docs_path = _normalize_docs_path(docs_path)
@@ -193,6 +202,45 @@ def map_domain_to_deployment(
     if not resolved_dns_target_ip:
         raise ValueError("dns_target_ip could not be resolved.")
 
+    # ── STEP 1: Hostinger DNS sync (before anything else so propagation starts) ──
+    hostinger_result: dict[str, Any] = {
+        "checked": False,
+        "updated": False,
+        "zone_domain": resolved_zone_domain,
+        "skipped_reason": None,
+    }
+    if hostinger_api_token.strip():
+        try:
+            hostinger_result = _sync_hostinger_dns(
+                domain=normalized_domain,
+                zone_domain=resolved_zone_domain,
+                target_ip=resolved_dns_target_ip,
+                api_token=hostinger_api_token,
+                include_www_alias=include_www_alias,
+            )
+            steps.append({"step": "hostinger_dns_sync", "status": "ok"})
+        except Exception as exc:
+            # Non-fatal: log the error and continue; the domain may already be configured
+            hostinger_result["error"] = str(exc)
+            hostinger_result["skipped_reason"] = "Hostinger API call failed — continuing without DNS update"
+            steps.append({"step": "hostinger_dns_sync", "status": "warning", "detail": str(exc)})
+    else:
+        hostinger_result["skipped_reason"] = "No Hostinger API token provided"
+        steps.append({"step": "hostinger_dns_sync", "status": "skipped", "detail": "no token"})
+
+    # ── STEP 2: Wait for DNS propagation to the server IP ──
+    dns_result = _wait_for_dns_propagation(
+        domain=normalized_domain,
+        target_ip=resolved_dns_target_ip,
+        max_wait_seconds=180,
+    )
+    steps.append({
+        "step": "dns_propagation",
+        "status": "ok" if dns_result["matches_target"] else "warning",
+        "detail": dns_result,
+    })
+
+    # ── STEP 3: Connect SSH, resolve port, install nginx ──
     ssh = _connect_ssh(
         host=ssh_host,
         port=ssh_port,
@@ -210,42 +258,56 @@ def map_domain_to_deployment(
             if resolved_port is None:
                 raise ValueError(f"Could not determine the published port for container '{resolved_container_name}'.")
 
+        # Install nginx (and certbot if HTTPS enabled), write site config, reload
         _install_reverse_proxy_dependencies(ssh, enable_https=enable_https)
-
         site_name = _trim_name(f"mcp-domain-{_slugify(normalized_domain)}")
         nginx_config = _render_nginx_site(domain=normalized_domain, proxy_port=resolved_port)
         _write_nginx_site(ssh, site_name=site_name, nginx_config=nginx_config)
         _reload_nginx(ssh)
         _wait_for_local_proxy(ssh, domain=normalized_domain, proxy_port=resolved_port)
+        steps.append({"step": "nginx_setup", "status": "ok", "site": site_name, "port": resolved_port})
 
-        dns_result = _check_dns_alignment(normalized_domain, resolved_dns_target_ip)
-        hostinger_result = {
-            "checked": False,
-            "updated": False,
-            "zone_domain": resolved_zone_domain,
-        }
-        if hostinger_api_token.strip():
-            hostinger_result = _sync_hostinger_dns(
-                domain=normalized_domain,
-                zone_domain=resolved_zone_domain,
-                target_ip=resolved_dns_target_ip,
-                api_token=hostinger_api_token,
-                include_www_alias=include_www_alias,
-            )
-
+        # ── STEP 4: TLS (certbot) — only when DNS is confirmed pointing to this server ──
         tls_enabled = False
+        tls_error: str | None = None
         tls_email = (certbot_email or settings.deploy_certbot_email).strip()
-        if enable_https and tls_email:
-            _obtain_tls_certificate(ssh, domain=normalized_domain, email=tls_email)
-            tls_enabled = True
-            _wait_for_public_proxy(ssh, domain=normalized_domain, docs_path=normalized_docs_path, https=True)
-        elif enable_https:
+
+        if not enable_https:
+            steps.append({"step": "certbot", "status": "skipped", "detail": "enable_https=False"})
+        elif not tls_email:
+            steps.append({"step": "certbot", "status": "skipped", "detail": "certbot_email not configured"})
             dns_result.setdefault("warnings", []).append(
-                "HTTPS was requested but certbot_email is not configured, so the domain remains on HTTP."
+                "HTTPS was requested but certbot_email is not set — domain is running on HTTP only."
             )
+        elif not dns_result.get("matches_target"):
+            # DNS not yet pointing to our server — skip certbot to avoid burning Let's Encrypt rate limit
+            msg = (
+                f"Certbot skipped: DNS for {normalized_domain} still resolves to "
+                f"{dns_result.get('resolved_ips')} instead of {resolved_dns_target_ip}. "
+                "Re-run map_domain once DNS has propagated to get HTTPS automatically."
+            )
+            steps.append({"step": "certbot", "status": "skipped", "detail": msg})
+            dns_result.setdefault("warnings", []).append(msg)
+        else:
+            try:
+                _obtain_tls_certificate(ssh, domain=normalized_domain, email=tls_email)
+                tls_enabled = True
+                _wait_for_public_proxy(ssh, domain=normalized_domain, docs_path=normalized_docs_path, https=True)
+                steps.append({"step": "certbot", "status": "ok"})
+            except Exception as exc:
+                tls_error = str(exc)
+                steps.append({"step": "certbot", "status": "error", "detail": tls_error})
+                dns_result.setdefault("warnings", []).append(
+                    f"TLS certificate issuance failed: {tls_error}. "
+                    "Ensure the domain DNS is propagated and port 80 is open on the server, then re-run map_domain."
+                )
 
         if not tls_enabled:
-            _wait_for_public_proxy(ssh, domain=normalized_domain, docs_path=normalized_docs_path, https=False)
+            try:
+                _wait_for_public_proxy(ssh, domain=normalized_domain, docs_path=normalized_docs_path, https=False)
+                steps.append({"step": "http_check", "status": "ok"})
+            except Exception as exc:
+                steps.append({"step": "http_check", "status": "warning", "detail": str(exc)})
 
         scheme = "https" if tls_enabled else "http"
         public_url = f"{scheme}://{normalized_domain}"
@@ -257,9 +319,11 @@ def map_domain_to_deployment(
             "container_name": resolved_container_name,
             "port": resolved_port,
             "tls_enabled": tls_enabled,
+            "tls_error": tls_error,
             "dns": dns_result,
             "hostinger": hostinger_result,
             "nginx_site": site_name,
+            "steps": steps,
         }
     finally:
         ssh.close()
@@ -462,6 +526,64 @@ exit 1
         raise RuntimeError(error_text or f"{scheme.upper()} endpoint for {domain} did not become reachable in time.")
 
 
+def _wait_for_dns_propagation(
+    domain: str,
+    target_ip: str,
+    *,
+    max_wait_seconds: int = 180,
+    poll_interval: int = 10,
+) -> dict[str, Any]:
+    """
+    Poll DNS until the domain resolves to target_ip or max_wait_seconds elapses.
+    Returns the same shape as _check_dns_alignment so callers can use either.
+    Non-blocking path: if already correct on first check, returns immediately.
+    """
+    import time
+
+    deadline = time.monotonic() + max_wait_seconds
+    attempts = 0
+    last_resolved: list[str] = []
+
+    while True:
+        attempts += 1
+        try:
+            last_resolved = sorted(set(socket.gethostbyname_ex(domain)[2]))
+        except OSError:
+            last_resolved = []
+
+        matches = target_ip in last_resolved
+        if matches:
+            return {
+                "checked": True,
+                "resolved_ips": last_resolved,
+                "target_ip": target_ip,
+                "matches_target": True,
+                "propagation_attempts": attempts,
+                "warnings": [],
+            }
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        time.sleep(min(poll_interval, remaining))
+
+    warnings = [
+        f"DNS for {domain} resolves to {last_resolved or '(unresolvable)'} after {attempts} attempts "
+        f"({max_wait_seconds}s wait) — expected {target_ip}. "
+        "Certbot SSL challenge will be skipped until DNS propagates. "
+        "Re-run map_domain after DNS update takes effect to enable HTTPS automatically."
+    ]
+    return {
+        "checked": True,
+        "resolved_ips": last_resolved,
+        "target_ip": target_ip,
+        "matches_target": False,
+        "propagation_attempts": attempts,
+        "warnings": warnings,
+    }
+
+
 def _check_dns_alignment(domain: str, target_ip: str) -> dict[str, Any]:
     try:
         resolved_ips = sorted(set(socket.gethostbyname_ex(domain)[2]))
@@ -545,15 +667,55 @@ def _sync_hostinger_dns(
     base_url = settings.hostinger_api_base_url.rstrip("/")
     headers = _hostinger_headers(api_token)
 
-    with httpx.Client(timeout=20.0, headers=headers) as client:
+    with httpx.Client(timeout=30.0, headers=headers) as client:
+        # First validate the zone exists and is accessible
+        check_response = client.get(f"{base_url}/api/dns/v1/zones/{zone_domain}")
+        if check_response.status_code == 404:
+            return {
+                "checked": True,
+                "updated": False,
+                "zone_domain": zone_domain,
+                "skipped_reason": (
+                    f"Zone '{zone_domain}' not found in Hostinger (HTTP 404). "
+                    "Ensure hostinger_zone_domain exactly matches your domain in hPanel "
+                    "(e.g. 'anervera.live' not 'anervea.ai') and the API token belongs to the same account."
+                ),
+            }
+        if check_response.status_code == 401:
+            return {
+                "checked": False,
+                "updated": False,
+                "zone_domain": zone_domain,
+                "skipped_reason": (
+                    "Hostinger API token is invalid or expired (HTTP 401). "
+                    "Regenerate a token from hPanel → API Access with DNS/zone permissions."
+                ),
+            }
+        if check_response.status_code not in (200, 201):
+            return {
+                "checked": False,
+                "updated": False,
+                "zone_domain": zone_domain,
+                "skipped_reason": (
+                    f"Hostinger zone check failed: HTTP {check_response.status_code} — {check_response.text[:500]}"
+                ),
+            }
+
+        # Zone exists — validate payload then apply update
         validate_response = client.post(f"{base_url}/api/dns/v1/zones/{zone_domain}/validate", json=payload)
-        if validate_response.status_code != 200:
-            raise RuntimeError(
-                f"Hostinger DNS validation failed: {validate_response.status_code} {validate_response.text[:1000]}"
-            )
+        if validate_response.status_code not in (200, 201):
+            return {
+                "checked": True,
+                "updated": False,
+                "zone_domain": zone_domain,
+                "skipped_reason": (
+                    f"Hostinger DNS validation rejected payload: HTTP {validate_response.status_code} "
+                    f"— {validate_response.text[:500]}"
+                ),
+            }
 
         update_response = client.put(f"{base_url}/api/dns/v1/zones/{zone_domain}", json=payload)
-        if update_response.status_code != 200:
+        if update_response.status_code not in (200, 201):
             raise RuntimeError(
                 f"Hostinger DNS update failed: {update_response.status_code} {update_response.text[:1000]}"
             )
@@ -563,6 +725,7 @@ def _sync_hostinger_dns(
         "updated": True,
         "zone_domain": zone_domain,
         "payload": payload,
+        "skipped_reason": None,
     }
 
 
